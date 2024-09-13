@@ -1,0 +1,590 @@
+---
+title: "MT5763 - Assignment 2 Report"
+author: "Joshua Arrabaca"
+date: "22 October 2023"
+output:
+  html_document: default
+---
+
+```{r setup, include=FALSE, }
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Github Links
+
+* **Github repo**: <https://github.com/mt5763standrews/individual-assignment-2-fjca1>
+* **Rmd file**: <https://github.com/mt5763standrews/individual-assignment-2-fjca1/blob/main/MT5763_2_220029955.Rmd>
+
+# Introduction
+Public bike sharing systems allow individuals to rent bicycles as an alternative to public transport. Here, bike sharing data for Seoul (for 2017 to 2018) and Washington DC (2011 to 2012) is explored and analysed to estimate bike rental counts given the season, temperature and other meteorological variables. Data wrangling, visualisation and analyses were done in R to come up with an acceptable model for prediction. Linear models were created for each city, but these performed poorly during the model assessments. Despite this, the exploratory analyses yielded useful information which showed that bike rentals generally increase in warmer months and decreases in colder months. This could be of value to bike shop owners and public transport officials who need to forecast bike demand and traffic.
+<br>
+
+
+
+# Methods  
+
+``` {r libraries, echo=F, message=F, warnings=F}
+library(readr)
+library(tidyverse)
+library(lubridate)
+library(ggplot2)
+library(gridExtra)
+library(scales)
+
+# add comments to each section
+# add correct x label axes  
+```
+The Bike data were provided in the class github repository, with one .csv file each for Seoul and Washington DC. These data were prepared and analysed separately, and only joined for some exploratory analysis. The following R packages were used for the data wrangling and analysis:
+
+* **readr** - Loading and saving the datasets in R;  
+* **tidyverse** - General data wrangling;  
+* **lubridate** - Parsing and conversion of strings to date format;
+* **ggplot2** - Visualisation of data through graphs; and
+* **gridExtra** - Aligning of generated graphs by pair. 
+
+The columns for Date, Hour, Count, Temperature, Humidity, WindSpeed, Season, and Holiday were maintained, and an additional column FullDate was added for both dataframes. In addition, standard data wrangling were used to convert Holiday and Season columns into factors (using `str_replace()` and `factor()`), and standardizing the numeric columns Temperature, Humidity and Windspeed so that they were consistent across both Seoul and Washington DC dataframes. Dates were also standardised using `make_datetime()`. 
+
+The resulting datawrangling produced two dataframes: one for Seoul's Bike Data and another for Washington DC's. Here we can see the head of **Seoul**'s dataframe with full dimensions of 8465 x 9.   
+<br>
+``` {r seoulDataFrame, echo = F, fig.cap="*The head of Seoul's 8465 x 9 data frame.*" }
+# DATA WRANGLING
+
+# Load Seoul dataset into R
+BikeSeoul <- read_csv("data/BikeSeoul.csv", show_col_types = FALSE)
+
+
+# Remove the following columns: visibility, dew point temperature, solar radiation, rainfall and snowfall, and check if those have been removed
+BikeSeoul <- select(BikeSeoul, -"Visibility (10m)", 
+                    -"Dew point temperature(C)", 
+                    -"Solar Radiation (MJ/m2)" , 
+                    -"Rainfall(mm)", 
+                    -"Snowfall (cm)" )
+
+# Filter out observations for which no bike count data was collected...
+BikeSeoul <- filter(BikeSeoul, `Rented Bike Count` != 0)
+
+# ...then remove the functioning day column as it is no longer required.
+BikeSeoul <- select(BikeSeoul, -"Functioning Day")
+
+# Change the name of the columns
+BikeSeoul <- BikeSeoul %>%
+  rename(Count = "Rented Bike Count",
+         Temperature = "Temperature(C)", 
+         Humidity = "Humidity(%)", 
+         WindSpeed = "Wind speed (m/s)", 
+         Season = "Seasons")
+
+# Convert Date to a date object
+BikeSeoul <- BikeSeoul %>%
+  mutate(Date = as.Date(Date, format = "%d/%m/%Y"))
+
+# Create a new variable called FullDate which includes the hour in it
+BikeSeoul <- BikeSeoul %>%
+  add_column (FullDate = make_datetime (year = year(BikeSeoul$Date),
+               month = month(BikeSeoul$Date),
+               day = day(BikeSeoul$Date),
+               hour = BikeSeoul$Hour,
+               min = 0L,
+               sec = 0))
+
+# Change the factor levels of Holiday to Yes / No (in this this order).
+BikeSeoul <- BikeSeoul %>% 
+  mutate(Holiday = str_replace(Holiday, "No Holiday", "No")) %>%
+  mutate(Holiday = str_replace(Holiday, "Holiday", "Yes")) %>%
+  mutate(Holiday = factor (Holiday, levels = c("Yes", "No")))
+
+# Change the order of the Season factor levels to Spring, Summer, Autumn and Winter
+BikeSeoul <- BikeSeoul %>% 
+  mutate(Season  = factor(
+    Season, levels = c("Spring",
+                       "Summer",
+                       "Autumn",
+                       "Winter")))
+
+# View the head of BikeSeoul
+head(BikeSeoul, 5)
+
+```
+<br>  
+Similar methods are applied for **Washington DC**'s data, resulting in a data frame with dimensions 17379 x 9. Note that this is more than twice the number of rows compare to Seoul's.  
+<br>
+``` {r wdcDataFrame, echo = F, fig.cap="*The head of Washington DC's 17379 x 9 data frame.This is more than twice the number of rows compared to Seoul's.*"}
+# Load Washington dataset into R
+BikeWashingtonDC <- read_csv("data/BikeWashingtonDC.csv", 
+                             show_col_types = FALSE)
+                      
+# Remove the following columns: unique record index, year, month, day of the week, working day, weather condition, normalised feeling temperature and number of bikes rented by casual and registered users (i.e. keep only the total count).
+BikeWashingtonDC <- select(BikeWashingtonDC, 
+                           -"instant", 
+                           -"yr", 
+                           -"mnth", 
+                           -"weekday", 
+                           -"workingday", 
+                           -"weathersit", 
+                           -"atemp", 
+                           -"casual", 
+                           -"registered" )
+
+# Change the name of the columns to match the ones for Seoul.
+BikeWashingtonDC <- BikeWashingtonDC %>%
+  rename(Date = "dteday",
+         Season = "season",
+         Hour = "hr",
+         Holiday = "holiday",
+         Temperature = "temp",
+         Humidity = "hum",
+         WindSpeed = "windspeed",
+         Count = "cnt")
+
+# Convert Humidity to a %
+BikeWashingtonDC <- BikeWashingtonDC %>%
+  mutate(Humidity = Humidity * 100)
+
+# Convert Temperature to degrees Celsius.
+BikeWashingtonDC <- BikeWashingtonDC %>%
+  mutate(Temperature = ( (Temperature * 47) - 8))
+
+# Convert WindSpeed to m/s
+BikeWashingtonDC <- BikeWashingtonDC %>%
+  mutate(WindSpeed = ( (WindSpeed * 67) / 3.6))
+
+# Change the factor levels of Season to Spring, Summer, Autumn and Winter (in this order to match Seoul’s one).
+BikeWashingtonDC <- BikeWashingtonDC %>% 
+  mutate(Season = as.character(Season)) %>%
+  mutate(Season = str_replace(Season, "1", "Winter")) %>% 
+  mutate(Season = str_replace(Season, "2", "Spring")) %>% 
+  mutate(Season = str_replace(Season, "3", "Summer")) %>%
+  mutate(Season = str_replace(Season, "4", "Autumn")) %>% 
+  mutate(Season  = factor(Season, levels = c("Spring",
+                                             "Summer",
+                                             "Autumn",
+                                             "Winter")))
+
+# Change the factor levels of Holiday to Yes / No (in this this order).
+BikeWashingtonDC <- BikeWashingtonDC %>%
+  mutate(Holiday = as.character(Holiday)) %>%
+  mutate(Holiday = str_replace(Holiday, "0", "No")) %>%
+  mutate(Holiday = str_replace(Holiday, "1", "Yes")) %>%
+  mutate(Holiday = factor(Holiday, levels = c("Yes", "No")))
+
+# Convert Date to a date object.
+BikeWashingtonDC <- BikeWashingtonDC %>%
+  mutate(Date = as.Date(Date, format = "%d/%m/%Y"))
+
+# Create a new variable called FullDate which includes the hour in it
+BikeWashingtonDC <- BikeWashingtonDC %>%
+  add_column (FullDate = make_datetime (
+    year = year(BikeWashingtonDC$Date),
+    month = month(BikeWashingtonDC$Date),
+    day = day(BikeWashingtonDC$Date),
+    hour = BikeWashingtonDC$Hour,
+    min = 0L,
+    sec = 0))
+
+# View the head of BikeWashingtonDC
+head(BikeWashingtonDC, 5)
+
+```
+```{r, echo=FALSE}
+# Bind both datasets into one dataset
+BikeBoth <-rbind (BikeSeoul, BikeWashingtonDC)
+```
+<br>
+A third dataset with all rows was created for some exploratory plots using `rbind()`. However, due to the disparity in dates of the dataframes, some considerations were made during the exploraratory analysis. In comparing the mean air temperatures of both cities, since the dataframes span different time periods (December 2017 to November 2018 for Seoul, and January 2011 to December 2012 for Washington DC), the time frame for the plots was set from December to November (the next year) for a uniform period of 12 months for both plots. To fit the regression line, the `method="gam"` was used since it is assume here that temperature response is smooth over time. In comparison, when analysing the average bike rentals per season and on holidays, the absolute numbers were used despite their large disparity as the relative values shown in the graphs showed consistent results for both cities (i.e. the graphs look comparable despite the different bike usage counts per city).
+
+The bike counts were then aggregated by season (Spring, Summer, Autumn, and Winter) to view the seasonal effects on rentals, then by holiday (Yes or No) to view bike usage on holidays, and finally by time of day (0h to 24h) to view the hourly figures. These were grouped using the `aggregate()` and `group_by()` functions.
+
+To understand the impact of meteorological variables on average bike usage, the temperature (°C), wind speed (m/s) and humidity (%) were used as variables to compare with the rental counts. Due to the number of variables, two sets of scatterplots were used. For both sets, bike usage and temperature formed the x and y axes, while humidity and windspeed were each used on separate box plots as the z variable for colorising the plot points.
+
+For the statistical analysis, a linear model was created using `lm()` with log of bike count as the response, and season, air temperature, humidity and wind speed as the predictors. The 0.97 confidence intervals were then computed using `confint()`.
+
+Model exploration was also performed using Akaike information criterion in R using `lm(log(Count) ~ . -Date -FullDate, data=model)` to assess whether a better model could be used. The models' residuals as well as their Adjusted-R Squared values were also taken into account in assessing the models.
+
+Finally, predictions were made using `predict()` for a hypothetical situation with a temperature of 0◦C, wind speed of 0.5m/s and humidity of 20%. Since the result is the `log()` of count, it was then exponentiated back using `exp()` to arrive at the appropriate predictions.  
+<br>
+
+# Results
+### Exploratory Data Analysis
+Seoul and Washington DC share similar temperature patterns throughout the year, with the coldest temperatures in February (around -3◦C and 5◦C for Seoul and Washington DC respectively), and warmest temperatures in August (around 30◦C and 28◦C respectively) . While not exactly the same, the temperature pattern are similar enough that comparisons can be drawn when using temperature as an explanatory variable.
+
+``` {r airTemperaturePerCity, out.width="85%", fig.cap=" **Figure 1:** *Air temperature (in Celsius) in Seoul from December 2017 to November 2018, and in Washington DC from December 2011 to  November 2012.*",  fig.align="center", echo = FALSE, message=FALSE, warning=FALSE}
+
+# Q: How does air temperature vary over the course of a year?
+# Create the plot for Seoul.
+temper.plot.seoul <- ggplot(BikeSeoul) +
+  geom_line( aes(x = Date, y = Temperature)) +
+  stat_smooth(method = "gam", aes(x = Date, y = Temperature), color = "#7570b3") +
+  xlab("Dec 2017 to Nov 2018") + ylab("Temp (in Celsius)") +
+  ggtitle("Air Temperature in Seoul")
+
+# Create the plot for Washington Dc.
+temper.plot.wdc <- ggplot(BikeWashingtonDC) +
+  geom_line( aes(x = Date, y = Temperature)) +
+  scale_x_date(limit=c(as.Date("2011-12-01"),as.Date("2012-11-30"))) +
+  stat_smooth(method = "gam", aes(x = Date, y = Temperature), colour = "#d95f02") +
+  xlab("Dec 2011 to Nov 2012") + ylab("Temp (in Celsius)") +
+  ggtitle("Air Temperature in Washington DC")
+
+# Display the plots with Seoul on top, followed by Washington DC.
+grid.arrange(temper.plot.seoul, temper.plot.wdc, ncol = 1)
+
+```
+<br>
+When comparing usage by season, bike rentals are highest in summer (mean of 499 for both cities with 1,034 and 238 in Seoul and Washington DC respectively), and lowest in Winter (150 for both, and 226 and 111 respectively). The results are similar for both Seoul and Washington DC, with mean usage overlapping the 1st quantiles in both cities in all seasons (except for Seoul which has the lowest variance in winter).  
+
+``` {r seasonsPlotBoth, out.width="85%", fig.align="center", echo = FALSE, message=FALSE, warning=FALSE} 
+# Q: Do seasons affect the average number of rented bikes?
+
+# Create the plot for both cities and print it
+season.plot.both <- ggplot (BikeBoth) +
+  geom_boxplot ( aes(x = Count, y = Season), fill = "#1b9e77") +
+  xlab("Daily Bike Rentals") + ylab("Season") +
+  ggtitle("Bike Usage by Season in Both Cities")
+
+season.plot.both
+
+# Find the mean counts for both cities
+season.means.both <- BikeBoth %>% group_by(Season) %>%
+  summarise(mean_count=mean(Count))
+
+# uncomment and run separately to view the results
+# season.means.both
+
+```
+
+``` {r, seasonsPlotEach, out.width="85%", fig.cap="**Figure 2**: *Bike Usage per Season*", fig.align="center", echo = FALSE, message=FALSE, warning=FALSE}
+
+# Create the plot for Seoul.
+season.plot.seoul <- ggplot (BikeSeoul) +
+  geom_boxplot ( aes(x = Count, y = Season), fill = "#7570b3") +
+  xlab("Daily Bike Rentals") + ylab("Season") +
+  ggtitle("Bike Usage by Season\n in Seoul")
+
+# Create the plot for Washington DC.
+season.plot.wdc <- ggplot (BikeWashingtonDC) +
+  geom_boxplot ( aes(x = Count, y = Season), fill = "#d95f02") +
+  xlab("Daily Bike Rentals") + ylab("Season") +
+  ggtitle("Bike Usage by Season\n in Washington DC")
+
+# Display the plots side by side.
+grid.arrange(season.plot.seoul, season.plot.wdc, ncol = 2)
+
+# Find the mean counts by season 
+season.means.seoul <- BikeSeoul %>% group_by(Season) %>%
+  summarise("Mean Count" = round(mean(Count), 2))
+season.means.wdc <- BikeWashingtonDC %>% group_by(Season) %>%
+  summarise("Mean Count" = round(mean(Count), 2))
+
+# uncomment and run separately to view the results
+# season.means.seoul
+# season.means.wdc
+```
+  
+<br>
+Bike usage on holidays vs non-holidays are also similar for both Seoul and Washington DC, with more bike rentals on non-holidays (on average of 739 and 190 respectively), than on holidays (529 and 157 respectively). On average for both cities, there are	more bike rentals on non-holidays (368) than on non-holidays (324). 
+``` {r, holidayPlot, out.width="80%", fig.cap="**Figure 3:** *Bike Rentals on Holidays vs Non-Holidays*", fig.align="center", echo = FALSE, message=FALSE, warning=FALSE}
+
+# Q: Do holidays increase or decrease the demand for rented bikes?
+
+# Calculate means per city on holidays and non-holidays
+both.holi.yes <- mean(BikeBoth$Count[BikeBoth$Holiday=="Yes"])
+both.holi.no <- mean(BikeBoth$Count[BikeBoth$Holiday=="No"])
+seoul.holi.yes <- mean(BikeSeoul$Count[BikeSeoul$Holiday=="Yes"])
+seoul.holi.no <- mean(BikeSeoul$Count[BikeSeoul$Holiday=="No"])
+wdc.holi.yes <- mean(BikeWashingtonDC$Count[BikeWashingtonDC$Holiday=="Yes"])
+wdc.holi.no <- mean(BikeWashingtonDC$Count[BikeWashingtonDC$Holiday=="No"])
+
+# Create dataframes for each city.
+both.holi.df <- data.frame(Holiday = c("Yes", "No"),
+                            Averages = c(both.holi.yes, both.holi.no))
+seoul.holi.df <- data.frame(Holiday = c("Yes", "No"),
+                            Averages = c(seoul.holi.yes, seoul.holi.no))
+wdc.holi.df <- data.frame(Holiday = c("Yes", "No"),
+                            Averages = c(wdc.holi.yes, wdc.holi.no))
+
+# Create plots on holiday bike usage per city.
+holi.plot.both <- ggplot(both.holi.df) + 
+  geom_col( aes(x = Holiday, y= Averages), colour="#636363", fill = "#1b9e77") +
+  xlab("Was it a Holiday?") + ylab("Avg Bike Rentals per Day") +
+  ggtitle("Holiday Rentals in Both Cities")
+holi.plot.seoul <- ggplot(seoul.holi.df) + 
+  geom_col( aes(x = Holiday, y= Averages), colour="#636363", fill = "#7570b3") +
+  xlab("Was it a Holiday?") + ylab("") +
+  ggtitle("Seoul")
+holi.plot.wdc <- ggplot(wdc.holi.df) + 
+  geom_col( aes(x = Holiday, y= Averages), colour="#636363", fill = "#d95f02") +
+  xlab("Was it a Holiday?") + ylab("") +
+  ggtitle("Washington DC")
+
+
+# Display the plots in a grid.
+grid.arrange(holi.plot.both, holi.plot.seoul, holi.plot.wdc, 
+              layout_matrix = matrix(c(1, 1, 2, 3), byrow = TRUE, ncol = 4))
+
+
+# Find the mean counts for holidays vs non-holiday
+holi.means.both <- BikeBoth %>% 
+                    group_by(Holiday) %>%
+                    summarise(mean_count=mean(Count))
+holi.means.seoul <- BikeSeoul %>% 
+                      group_by(Holiday) %>%
+                      summarise(mean_count=mean(Count))
+holi.means.wdc <- BikeWashingtonDC %>% 
+                      group_by(Holiday) %>%
+                      summarise(mean_count=mean(Count))
+
+# Uncomment to view the means per city
+# holi.means.both
+# holi.means.seoul
+# holi.means.wdc
+```
+<br>  
+Time of day also has a significant effect on bike rentals, and the same pattern is observed in both Seoul and Washington DC, with the lowest rentals at around 4:00AM with only 52,824 average rentals for both cities (48,396 and 4,428 bike for Seoul and Washington DC respectively), which rises suddenly to a peak at 8:00AM with 631,732 (370,731 and 261,001 respectively). 
+  
+Bike usage then falls in the mid-morning, then steadily climbs back again to the maximum usage at 6:00PM with 858,340 (548,568 and 309,772 rentals for Seoul and Washington DC), then gradually falling as the night progress and dawn approaches the next day.  
+``` {r, timeOfDayBoth, fig.align="center", echo = FALSE, message=FALSE, warning=FALSE}
+# Q: How does the time of day affect the demand for rented bikes?
+
+# Create aggregates for both cities.
+both.hour.dens <- (aggregate (x = BikeBoth$Count,
+                               by = list(BikeBoth$Hour),
+                               FUN = sum) )
+
+# Create the plot for both cities, and display.
+hour.plot.both <- ggplot(both.hour.dens) +
+  geom_col( aes (x=Group.1, y=x), colour="#636363", fill = "#1b9e77" ) +
+  xlab ("Time of Day") + ylab("Avg Bike Rentals per Hour (in Thousands)") +
+  ggtitle("Bike Usage per Hour in Both Cities") +
+  scale_y_continuous(labels = scales::label_number_si())
+
+hour.plot.both
+
+# Uncomment to view the hourly usage
+# both.hour.dens
+```
+
+``` {r, timeOfDayPlotS, fig.cap="**Figure 4:** *Average Bike Rentals per Time of Day*", fig.align="center", echo = FALSE, message=FALSE, warning=FALSE}
+
+#Create the aggregates for Seoul and Washington DC.
+both.hour.dens <- (aggregate (x = BikeBoth$Count,
+                               by = list(BikeBoth$Hour),
+                               FUN = sum) )
+seoul.hour.dens <- (aggregate (x = BikeSeoul$Count,
+                               by = list(BikeSeoul$Hour),
+                               FUN = sum) )
+wdc.hour.dens <- (aggregate (x = BikeWashingtonDC$Count,
+                             by = list(BikeWashingtonDC$Hour),
+                             FUN = sum) )
+
+# Create the plot for each cities.
+hour.plot.seoul <- ggplot(seoul.hour.dens) +
+  geom_col( aes (x=Group.1, y=x), colour="#636363", fill = "#7570b3" ) +
+  xlab ("Time of Day") + ylab("Avg Bike Rentals per Hour (in Thousands)") +
+  ggtitle("Bike Usage per Hour\n in Seoul") +
+  scale_y_continuous(labels = scales::label_number_si())
+hour.plot.wdc <- ggplot(wdc.hour.dens) +
+  geom_col( aes (x=Group.1, y=x), colour="#636363", fill = "#d95f02" ) +
+  xlab ("Time of Day") + ylab("Avg Bike Rentals per Hour (in Thousands)") +
+  ggtitle("Bike Usage per Hour\n in Washington DC") +
+  scale_y_continuous(labels = scales::label_number_si())
+
+# Display the plots side-by-side.
+grid.arrange(hour.plot.seoul, hour.plot.wdc, ncol = 2)
+
+# Uncomment to view the hourly usage
+# seoul.hour.dens
+# wdc.hour.dens
+```
+
+``` {r tempLM, echo=F}
+# Describe the relationship between bike count and temperature
+temp.lm.seoul <- lm(Count ~ Temperature, data = BikeSeoul)
+temp.lm.wdc <- lm(Count ~ Temperature, data = BikeWashingtonDC)
+
+# Uncomment the following to see linear models
+# summary(temp.lm.seoul)
+# summary(temp.lm.wdc)
+```
+<br>
+A positive linear relationship can be seen between bike rentals and temperature for both cities, which can be described with the following:  
+
+$$Count_{Seoul} = 347.77 + 29.86 Temperature + \epsilon$$
+$$Count_{WDC} = 98.36 + 12.30 Temperature + \epsilon$$ 
+<br>
+When adding humidity as the 3rd variable, there is low correlation with bikes being rented when humidity is low in both cities; in Washington DC, there is mix of usage up to the highest humidity levels (98% in Seoul and 100% in Washington DC).
+
+For wind, only a few data points can be seen where bike are rented in windy conditions (i.e. wind speeds that are greater than 6m/s in Seoul, or greater than 12m/s in Washington DC).  
+<br>
+
+``` {r, weatherPlotBoth, echo=F, out.width="85%", fig.align="center"}
+# Q: Is there an association between bike demand and the three meteorological variables (air temperature, wind speed and humidity)?
+
+# Create the scatter plot for both cities with x = count, y = temp, z = humidity.
+hum.plot.both <- ggplot(data=BikeBoth, mapping=aes(x=Count, y=Temperature, fill = Humidity)) +
+  geom_point(colour="#636363",pch=21) +
+  scale_fill_gradient(low="#f5f5f5", high="#de2d26") +
+  xlab("Avg Bike Usage") + ylab("Temperature (C)") + labs(fill = "Humidity (%)") +
+  ggtitle("Bike Usage with Temperature and Humidity in Both Cities")
+
+# Create the scatter plot for both cities, this time with z = wind speed.
+wind.plot.Both <- ggplot(data=BikeSeoul, mapping=aes(x=Count, y=Temperature, fill = WindSpeed)) +
+  geom_point(colour="#636363",pch=23) +
+  scale_fill_gradient(low="#f5f5f5", high="#de2d26") +
+  xlab("Avg Bike Usage") + ylab("Temperature (C)") + labs(fill = "Wind Speed (m/s)") +
+  ggtitle("Bike Usage with Temperature and Wind Speed in Both Cities")  
+
+# Display both plots
+hum.plot.both
+wind.plot.Both
+
+```
+
+``` {r, weatherPlotEach, out.width="100%", fig.cap="**Figure 5:** *Relationships between Bike Usage and Meteorological Variables*", fig.align="center", echo = FALSE, message=FALSE, warning=FALSE}
+
+# Create the scatterplots for Seoul and WDC, with x = count, y = temp, z = humidity.
+hum.plot.seoul <- ggplot(data=BikeSeoul, mapping=aes(x=Count, y=Temperature, fill = Humidity)) +
+  geom_point(colour="#636363",pch=21) +
+  scale_fill_gradient(low="#f5f5f5", high="#de2d26") +
+  xlab("Avg Bike Usage") + ylab("Temperature (C)") + labs(fill = "Wind Speed (m/s)") +
+  ggtitle("Bike Usage with Temperature\n and Humidity in Seoul")
+
+hum.plot.wdc <- ggplot(data=BikeWashingtonDC, mapping=aes(x=Count, y=Temperature, fill = Humidity)) +
+  geom_point(colour="#636363",pch=21) +
+  scale_fill_gradient(low="#f5f5f5", high="#de2d26") +
+  xlab("Avg Bike Usage") + ylab("Temperature (C)") + labs(fill = "Humidity (%)") +
+  ggtitle("Bike Usage with Temperature\n and Humidity in WashingtonDC")  
+
+# Create the scatterplots for Seoul and WDC, this time with z = wind speed.
+wind.plot.seoul <- ggplot(data=BikeSeoul, mapping=aes(x=Count, y=Temperature, fill = WindSpeed)) +
+  geom_point(colour="#636363",pch=23) +
+  scale_fill_gradient(low="#f5f5f5", high="#de2d26") +
+  xlab("Avg Bike Usage") + ylab("Temperature (C)") + labs(fill = "Wind Speed (m/s)") +
+  ggtitle("Bike Usage with Temperature\n and Wind Speed in Seoul")  
+
+wind.plot.wdc <- ggplot(data=BikeWashingtonDC, mapping=aes(x=Count, y=Temperature, fill = WindSpeed)) +
+  geom_point(colour="#636363",pch=23) +
+  scale_fill_gradient(low="#f5f5f5", high="#de2d26") +
+  xlab("Avg Bike Usage") + ylab("Temperature (C)") + labs(fill = "Humidity (%)") +
+  ggtitle("Bike Usage with Temperature\n and Wind Speed in WashingtonDC") 
+
+# Display the plots in a 2 x 2 grid.
+grid.arrange(hum.plot.seoul, hum.plot.wdc, wind.plot.seoul, wind.plot.wdc, ncol = 2)
+
+```
+<br>  
+  
+### Statistical Modelling
+``` {r, weatherLM, echo = FALSE, message=FALSE, warning=FALSE}
+# Fit a linear model with log count as outcome, and season, air temperature, humidity and wind speed as predictors. 
+mdl.seoul <- lm(log(Count) ~ Season + Temperature + Humidity + WindSpeed, data = BikeSeoul)
+mdl.wdc <- lm(log(Count) ~ Season + Temperature + Humidity + WindSpeed, data = BikeWashingtonDC)
+
+# Uncomment to view the linear model summaries
+# summary(mdl.seoul)
+# summary(mdl.wdc)
+```
+The Linear models with count as the explanatory variable, and the meteorological factors as predictors can be described as follows:
+
+$$Log(Co\hat unt) = {\beta}_0 + {\beta}_1 Season + {\beta}_2 Temperature + {\beta}_3 Humidity + {\beta}_3 Windspeed $$   
+For each city, the statements become:
+
+$$Log(Co\hat unt_{Seoul}) = 6.734 + Season + 0.049Temperature - 0.022Humidity + 0.025Windspeed $$
+$$Log(Co\hat unt_{WDC}) = 4.626 + Season + 0.80Temperature - 0.023Humidity + 0.025Windspeed $$
+<br>
+The above formulas show very similar (rounded) coefficients when weather conditions are taken into account. Below are  the 97% confidence intervals for the intercept and coefficients for **Seoul**:  
+
+
+``` {r, confIntSeoul, echo = FALSE, message=FALSE, warning=FALSE}
+# Display the 97% confidence intervals for the estimated regression coefficients.
+confint(mdl.seoul, level = 0.97) |> round (3)
+
+```
+<br>
+And here are the 97% confidence intervals for **Washington DC**: 
+``` {r, confIntWDC, echo = FALSE, message=FALSE, warning=FALSE}
+# Display the 97% confidence intervals for the estimated regression coefficients.
+confint(mdl.wdc, level = 0.97) |> round (3)
+
+```
+<br>
+Assuming the above models are reliable and can be used for predictions, below are the predicted bike rental counts with the 90% **prediction** intervals. For **Seoul**, the predicted bike counts would be:   
+``` {r, predSeoul, echo = FALSE, message=FALSE, warning=FALSE}
+# Defining the dataframe of values to pass on to the predictions
+dfPred <- data.frame(Season = "Winter",
+                    Temperature = 0,
+                    WindSpeed = 0.5,
+                    Humidity = 20)
+
+# Exponentiated prediction for Seoul
+predict (object = mdl.seoul, newdata = dfPred, interval = "prediction", level = 0.90 ) |> 
+  exp() |> 
+  round(2)
+
+```
+<br>
+And for **Washington DC**:   
+``` {r, predWDC, echo = FALSE, message=FALSE, warning=FALSE}
+# Exponentiated prediction for Washington DC
+predict (object = mdl.wdc, newdata = dfPred, interval = "prediction", level = 0.90 ) |> 
+  exp() |> 
+  round(2)
+
+```
+```{r, AIC, echo=F}
+# Perform AIC on all possible coefficients. Uncomment to view the results
+# step( lm(log(Count) ~ . -Date -FullDate, data=BikeSeoul), direction="both" )
+# step( lm(log(Count) ~ . -Date -FullDate, data=BikeWashingtonDC), direction="both" )
+```
+In evaluating the above models, the resulting AIC scores were -4194.81 for Seoul and 2908.24 for Washington DC, with no variables recommended to be dropped. However, the residuals for both models show left skewed distributions, especially for Seoul. In addition, both models have relatively low adjusted R-squared values of 0.494 for Seoul and 0.278 and Washington DC.
+
+
+``` {r, Residuals, out.width="90%",fig.cap="**Figure 6:** *Residuals Histograms for Seoul and Washington DC linear models*", fig.align="center", echo = FALSE, message=FALSE, warning=FALSE, echo = FALSE, message=FALSE, warning=FALSE}
+# Create the residuals histogram for Seoul's linear model.
+res.plot.seoul <- ggplot() +
+  geom_histogram(aes(x = mdl.seoul$residuals), 
+                 fill = '#7570b3', 
+                 color = "#636363") +
+  xlab("Residuals") + ylab("Frequency") +
+  ggtitle("Histogram of Residuals for \nSeoul Linear Model") 
+
+# Create the residuals histogram for DC's linear model.
+res.plot.wdc <- ggplot() +
+  geom_histogram(aes(x = mdl.wdc$residuals), 
+                 fill = '#d95f02', 
+                 color = "#636363") +
+  xlab("Residuals") + ylab("Frequency") +
+  ggtitle("Histogram of Residuals for\nWashington DC Linear Model") 
+
+# Display the plots side-by-side.
+grid.arrange(res.plot.seoul, res.plot.wdc, ncol = 2)
+
+```
+<br> 
+
+# Discussion
+
+The results show a similar relationship between bike rental counts and the other variables for both Seoul and Washington DC, foremost with increasing temperature having a positive impact on bike usage. This is also backed up by the rentals per season where summer has the most mean rentals whereas winter has the least (for both cities).  
+
+With regards to the seasons box plots, it is also interesting to see that there are several outliers past the upper quantile (for example, for summer in Washington DC, the upper quantile terminates at round 300, but has outliers beyond 750). This may be due to non-regular users of bikes (for example, several tourists visiting the city). In addition, the boxplot for Seoul's winter season shows an extremely narrow range (from around 100 to 300). This behaviour is not shared with the other seasons or with Washington DC, and may be due to the colder temperatures in Seoul's mean winter temperatures which can reach below 0∘C (compared to Washington whose mean temperatures sit just above freezing).  
+
+The hour of the day also has a noticeable impact on bike usage for both cities, and show similar social behavior on renting bikes. The most significant peaks at 8:00AM and 6:00PM suggest heavy usage during the start of work and school when most people start and end their day. Although not totally unexpected, bike rentals still continue to be active during the off-peak hours past midnight up to 5:00AM (albeit at a much lower pace).  
+
+There is a however a surprising difference for bike usage on holidays vs non-holidays, with more rentals on non-holidays. This could be due to other factors such as using bikes to commute to and from work, and would be an interesting case to study in the future.  
+
+Humidity and windspeed have minimal impact on bike usage, with more rentals done in low humidity and light wind albeit these correlations are very low. The relationship of wind speed in particular is interesting since there are scattered points of bike usage when wind speed is more than 12 m/s. However, this could be a case of survivorship bias since there is an overwhelming count for bike rentals when windspeed is very low. This factor could therefore be a dubious addition to the model.  
+
+The coefficient values for both cities are very close which implies that meteorological conditions do have a uniform impact on bike usage for both cities, and possibly in other cities.  Looking at the specific coefficient values, summer season for Seoul has the lowest coefficient value of 0.004 and a high p-value of 0.91 which suggest that this particular season can be dropped from the model. 
+
+With regards to the confidence intervals, most of the coefficients have relatively short interval ranges. For example, Temperature has a range of (0.046, 0.053) for Seoul and (0.076, 0.084) for Washington DC, which indicate that the true value for those coefficients are very close. In contrast, SeasonSummer for Seoul has an interval range of (-0.068, 0.075) which straddles the zero mark and supports the above implication that this coefficient could be left out of Seoul's model.  
+
+Taking a look at the predictions for rented bikes in winter freezing conditions with light wind and 20% humidity, the results seem plausible at first glance; Seoul's predicted count of 369.96 and Washington's prediction count of 71.98 both reflect the exploratory analysis above where winter and low temperature conditions show very low counts.  The 90% prediction intervals of (94.75, 1444.63) for Seoul and (9.01, 575.29) for Washington DC do show the possibility of higher bike rentals.  
+
+However, looking at the residuals histograms with their left skewed distribution, this suggests that there may be several outliers in the data (as seen in the box plots), and the model may be over predicting. In addition, the adjusted R-squared values of 0.494 for Seoul and 0.278 for Washington DC also indicate that the variables do not explain very well the count of bike rentals. Therefore, the above predicted values cannot be used as reliable estimates.
+
+Despite these caveats, there are still some useful insights from these analyses, and some general recommendations can be suggested:  
+
+* Stock more bikes during the summer months and fewer in winter months.
+* Ensure availability of bikes during the peak hours of 8:00AM and 6:00PM.
+* Schedule maintenance on low demand days such as holidays.
+
+The above recommendations  will be useful for shop owners in estimating total demand, and for city transport officials in estimating bike traffic in Seoul and Washington DC.
